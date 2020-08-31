@@ -487,7 +487,7 @@ NTSTATUS CreateProcessEx(HANDLE hProcess,
 
 			if (TargetSessionId != ProcessSessionId)
 			{
-				// need TOKEN_ADJUST_SESSIONID
+				// need TOKEN_ADJUST_SESSIONID | TOKEN_ADJUST_DEFAULT
 				status = NtSetInformationToken(hNewToken, TokenSessionId, &TargetSessionId, sizeof(TargetSessionId));
 			}
 
@@ -1016,7 +1016,7 @@ void CMyApp::OnDropDownDeb(HWND hwndCtl)
 	{
 		status = STATUS_INSUFFICIENT_RESOURCES;
 
-		if (pv = new BYTE[cb])
+		if (pv = new BYTE[cb += 0x1000])
 		{
 			if (0 <= (status = ZwQuerySystemInformation(
 				SystemExtendedHandleInformation, pv, cb, &cb)))
@@ -1851,7 +1851,8 @@ void ep([[maybe_unused]] PVOID wow)
 #ifndef _WIN64
 	if (0 > ZwQueryInformationProcess(NtCurrentProcess(), ProcessWow64Information, &wow, sizeof(wow), 0) || wow)
 	{
-		MessageBox(0, L"use 64-bit version of RunAsPro!", 0, MB_ICONWARNING);
+		MessageBox(0, L"The 32-bit version of this program is not compatible with the 64-bit Windows you're running.", 
+			L"Machine Type Mismatch", MB_ICONWARNING);
 		ExitProcess(0);
 	}
 #else

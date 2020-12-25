@@ -154,11 +154,6 @@ struct AutoImpesonate
 	}
 };
 
-#define LAA(se) {{se},SE_PRIVILEGE_ENABLED}
-
-#define BEGIN_PRIVILEGES(tp, n) static const struct {ULONG PrivilegeCount;LUID_AND_ATTRIBUTES Privileges[n];} tp = {n,{
-#define END_PRIVILEGES }};
-
 BEGIN_PRIVILEGES(tp_TCB_Assign_Debug_Quota_Create_Load, 6)
 	LAA(SE_TCB_PRIVILEGE),
 	LAA(SE_DEBUG_PRIVILEGE),
@@ -234,7 +229,7 @@ __v:
 			if (0 <= status)
 			{
 				if (STATUS_SUCCESS == NtAdjustPrivilegesToken(hNewToken, FALSE, 
-					(PTOKEN_PRIVILEGES)&tp_TCB_Assign_Debug_Quota_Create_Load, 0, 0, 0))	
+					const_cast<PTOKEN_PRIVILEGES>(&tp_TCB_Assign_Debug_Quota_Create_Load), 0, 0, 0))	
 				{
 					*phSysToken = hNewToken;
 					return STATUS_SUCCESS;

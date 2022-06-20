@@ -98,10 +98,9 @@ public:
 	}
 };
 
-extern volatile UCHAR guz;
-//#pragma warning(disable)
+extern const volatile UCHAR guz;
+extern const OBJECT_ATTRIBUTES zoa;
 const static UNICODE_STRING emptyUS{};
-const static OBJECT_ATTRIBUTES zoa = { sizeof(zoa) };
 
 PCSTR GetSidNameUseName(SID_NAME_USE snu)
 {
@@ -358,7 +357,7 @@ NTSTATUS DumpACEList(WLog& log, LSA_LOOKUP_HANDLE PolicyHandle, ULONG AceCount, 
 		}
 
 		ACCESS_MASK Mask = pah->Mask;
-		sprintf_s(sz2, "%08X", Mask);
+		sprintf_s(sz2, _countof(sz2), "%08X", Mask);
 
 		switch (pah->Header.AceType)
 		{
@@ -379,7 +378,7 @@ NTSTATUS DumpACEList(WLog& log, LSA_LOOKUP_HANDLE PolicyHandle, ULONG AceCount, 
 			sz2[3] = 0;
 			break;
 		default:
-			sprintf_s(sz, "0x%x", pah->Header.AceType);
+			sprintf_s(sz, _countof(sz), "0x%x", pah->Header.AceType);
 		}
 
 		if (0 > RtlConvertSidToUnicodeString(&StringSid, Sid, TRUE))
@@ -541,31 +540,31 @@ void DumpToken(WLog& log, LSA_LOOKUP_HANDLE PolicyHandle, HANDLE hToken, BOOL bR
 		switch (stat.TokenType)
 		{
 		case TokenPrimary:
-			fmt = "Primary";
+			fmt = const_cast<PSTR>("Primary");
 			break;
 		case TokenImpersonation:
-			fmt = "Impersonation";
+			fmt = const_cast<PSTR>("Impersonation");
 			break;
 		default:
-			sprintf_s(sz, "%x", stat.TokenType), fmt = sz;
+			sprintf_s(sz, _countof(sz), "%x", stat.TokenType), fmt = sz;
 		}
 
 		switch (stat.ImpersonationLevel)
 		{
 		case SecurityAnonymous:
-			fmt2 = "Anonymous";
+			fmt2 = const_cast<PSTR>("Anonymous");
 			break;
 		case SecurityIdentification:
-			fmt2 = "Identification";
+			fmt2 = const_cast<PSTR>("Identification");
 			break;
 		case SecurityImpersonation:
-			fmt2 = "Impersonation";
+			fmt2 = const_cast<PSTR>("Impersonation");
 			break;
 		case SecurityDelegation:
-			fmt2 = "Delegation";
+			fmt2 = const_cast<PSTR>("Delegation");
 			break;
 		default:
-			sprintf_s(sz2, "%x", stat.ImpersonationLevel), fmt2 = sz2;
+			sprintf_s(sz2, _countof(sz2), "%x", stat.ImpersonationLevel), fmt2 = sz2;
 		}
 
 		log(L"TokenId:           %08x-%08x\r\n"
@@ -610,14 +609,14 @@ void DumpToken(WLog& log, LSA_LOOKUP_HANDLE PolicyHandle, HANDLE hToken, BOOL bR
 		switch (tet)
 		{
 		case TokenElevationTypeDefault:
-			fmt = "Default";
+			fmt = const_cast<PSTR>("Default");
 			bReqursive = TRUE;// no linked token
 			break;
 		case TokenElevationTypeFull:
-			fmt = "Full";
+			fmt = const_cast<PSTR>("Full");
 			break;
 		case TokenElevationTypeLimited:
-			fmt = "Limited";
+			fmt = const_cast<PSTR>("Limited");
 			break;
 		default:
 			sprintf(sz, "%x", tet), fmt = sz;

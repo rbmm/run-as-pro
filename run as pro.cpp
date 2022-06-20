@@ -11,7 +11,7 @@ _NT_BEGIN
 #include "../tkn/tkn.h"
 
 BOOL g_xp;
-volatile UCHAR guz;
+extern const volatile UCHAR guz = 0;
 OBJECT_ATTRIBUTES zoa = { sizeof zoa };
 
 #ifdef _WIN64
@@ -292,7 +292,7 @@ NTSTATUS GetLastNtStatus(BOOL fOk)
 	if (fOk) return STATUS_SUCCESS;
 	NTSTATUS status = RtlGetLastNtStatus();
 	ULONG dwError = GetLastError();
-	return RtlNtStatusToDosErrorNoTeb(status) == dwError ? status : C_HRESULT_FROM_WIN32(dwError);
+	return RtlNtStatusToDosErrorNoTeb(status) == dwError ? status : HRESULT_FROM_WIN32(dwError);
 }
 
 EXTERN_C NTSYSCALLAPI NTSTATUS NTAPI NtCreateToken(
@@ -935,6 +935,7 @@ NTSTATUS CMyApp::ShowProcessToken()
 			WCHAR sz[64];
 			_snwprintf(sz, _countof(sz), L"%x Process Token", (ULONG)(ULONG_PTR)cid.UniqueProcess);
 			ShowXY(DumpToken, hToken, sz, 0, _hFont);
+			NtClose(hToken);
 		}
 	}
 

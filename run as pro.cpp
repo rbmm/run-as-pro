@@ -16,17 +16,14 @@ OBJECT_ATTRIBUTES zoa = { sizeof zoa };
 
 #ifdef _WIN64
 
-#include "wow.h"
+#include "../wow/wow.h"
 
-PVOID g_LoadLibraryExWWow;
+enum { i_LoadLibraryExW, i_VirtualFree };
 
-BEGIN_WOW_DLL(kernel32)
-	WOW_FUNC(LoadLibraryExW)
-END_HOOK()
-
-WOW_PROCS_BEGIN()
-	WOW_DLL(kernel32)
-END_HOOK()
+BEGIN_DLL_FUNCS(kernel32, 0)
+	FUNC(LoadLibraryExW),
+	FUNC(VirtualFree),
+END_DLL_FUNCS();
 
 #endif
 
@@ -1515,18 +1512,44 @@ NTSTATUS ApcInjector(LPCWSTR lpDllName, HANDLE hProcess, HANDLE hThread)
 
 	status = ZwWriteVirtualMemory(hProcess, BaseAddress,(LPVOID)lpDllName, (ULONG)Len, 0);
 
-	if (0 > status) return status;
+	if (0 > status) 
+	{
+		ZwFreeVirtualMemory(hProcess, &BaseAddress, &(Size = 0), MEM_RELEASE);
+		return status;
+	}
 
 #ifdef _WIN64
 	PVOID wow;
 	if (0 <= (status = ZwQueryInformationProcess(hProcess, ProcessWow64Information, &wow, sizeof(wow), 0)))
 	{
-		return (wow ? RtlQueueApcWow64Thread : ZwQueueApcThread)(hThread, (PKNORMAL_ROUTINE)(wow ? g_LoadLibraryExWWow : LoadLibraryExW), BaseAddress, 0, 0);
+		if (wow)
+		{
+			union {
+				PVOID pv;
+				PKNORMAL_ROUTINE NormalRoutine;
+			};
+			
+			if (pv = kernel32.funcs[i_LoadLibraryExW].pv)
+			{
+				status = RtlQueueApcWow64Thread(hThread, NormalRoutine, BaseAddress, 0, 0);
+			}
+
+			if (pv = kernel32.funcs[i_VirtualFree].pv)
+			{
+				RtlQueueApcWow64Thread(hThread, NormalRoutine, BaseAddress, 0, (PVOID)MEM_RELEASE);
+			}
+		}
+		else
+		{
+			status = ZwQueueApcThread(hThread, (PKNORMAL_ROUTINE)LoadLibraryExW, BaseAddress, 0, 0);
+			ZwQueueApcThread(hThread, (PKNORMAL_ROUTINE)VirtualFree, BaseAddress, 0, (PVOID)MEM_RELEASE);
+		}
 	}
-	return status;
 #else
-	return ZwQueueApcThread(hThread,(PKNORMAL_ROUTINE)LoadLibraryExW, BaseAddress, 0, 0);
+	status = ZwQueueApcThread(hThread,(PKNORMAL_ROUTINE)LoadLibraryExW, BaseAddress, 0, 0);
+	ZwQueueApcThread(hThread, (PKNORMAL_ROUTINE)VirtualFree, BaseAddress, 0, (PVOID)MEM_RELEASE);
 #endif
+	return status;
 }
 
 int SetFocusEx(HWND hwndCtl)
@@ -1852,7 +1875,7 @@ void ep([[maybe_unused]] PVOID wow)
 		ExitProcess(0);
 	}
 #else
-	getWowProcs();
+	DLL_LIST_0::Process(&kernel32);
 #endif
 
 	BOOLEAN b;

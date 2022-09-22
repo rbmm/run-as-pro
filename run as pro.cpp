@@ -112,7 +112,7 @@ LONG vex(::PEXCEPTION_POINTERS ExceptionInfo)
 
 	::_CONTEXT* ContextRecord = ExceptionInfo->ContextRecord;
 
-	if (EF* prf = EF::get())
+	if (_EF* prf = EF::get())
 	{
 
 #ifdef _WIN64 
@@ -812,7 +812,7 @@ class CMyApp
 		HANDLE hDebugObject;
 
 		HDEBOBJ(HANDLE hDebugObject) : hDebugObject(hDebugObject) {}
-		~HDEBOBJ() { NtClose(hDebugObject); }
+		~HDEBOBJ() { if (HANDLE h = hDebugObject) NtClose(h); }
 	} *m_first;
 
 	NTSTATUS _OnDropDownPro(HWND hwndCtl);
@@ -860,11 +860,16 @@ CMyApp::~CMyApp()
 {
 	DeleteDebugObjects();
 
-	if (_hFont) DeleteObject(_hFont);
+	union {
+		HGDIOBJ ho;
+		HANDLE h;
+	};
 
-	if (_hSysToken)
+	if (ho = _hFont) DeleteObject(ho);
+
+	if (h = _hSysToken)
 	{
-		NtClose(_hSysToken);
+		NtClose(h);
 	}
 }
 
@@ -985,8 +990,8 @@ void CMyApp::OnDropDownDeb(HWND hwndCtl)
 {
 	ComboBox_ResetContent(hwndCtl);
 	DeleteDebugObjects();
+	HANDLE hMyDebObj = 0, hProcess, hDebObj;
 
-	HANDLE hDebObj = 0, hProcess;
 	NTSTATUS status;
 	DWORD cb = 0x10000, rcb;
 
@@ -999,7 +1004,7 @@ void CMyApp::OnDropDownDeb(HWND hwndCtl)
 
 	if (!ObjectTypeIndex)
 	{
-		if (0 > NtCreateDebugObject(&hDebObj, SYNCHRONIZE, &zoa, 0))
+		if (0 > NtCreateDebugObject(&hMyDebObj, SYNCHRONIZE, &zoa, 0))
 		{
 			return ;
 		}
@@ -1024,7 +1029,7 @@ void CMyApp::OnDropDownDeb(HWND hwndCtl)
 					{
 						do 
 						{
-							if (Handles->UniqueProcessId == UniqueProcessId && Handles->HandleValue == (ULONG_PTR)hDebObj)
+							if (Handles->UniqueProcessId == UniqueProcessId && Handles->HandleValue == (ULONG_PTR)hMyDebObj)
 							{
 								ObjectTypeIndex = Handles->ObjectTypeIndex;
 
@@ -1103,9 +1108,9 @@ __1:
 
 	} while (STATUS_INFO_LENGTH_MISMATCH == status);
 	
-	if (hDebObj)
+	if (hMyDebObj)
 	{
-		NtClose(hDebObj);
+		NtClose(hMyDebObj);
 	}
 }
 
@@ -1203,23 +1208,68 @@ void CMyApp::OnDropDownWinsta(HWND hwndCtl)
 	EnumWindowStationsW(EnumWindowStationProc, (LPARAM)&ctx);
 }
 
+HRESULT OnBrowseI(_In_ HWND hwndDlg, 
+				  _In_ UINT cFileTypes, 
+				  _In_ const COMDLG_FILTERSPEC *rgFilterSpec, 
+				  _Out_ PWSTR* ppszFilePath, 
+				  _In_ UINT iFileType = 0)
+{
+	IFileDialog *pFileOpen;
+
+	HRESULT hr = CoCreateInstance(__uuidof(FileOpenDialog), NULL, CLSCTX_ALL, IID_PPV_ARGS(&pFileOpen));
+
+	if (SUCCEEDED(hr))
+	{
+		pFileOpen->SetOptions(FOS_NOVALIDATE|FOS_NOTESTFILECREATE|
+			FOS_NODEREFERENCELINKS|FOS_DONTADDTORECENT|FOS_FORCESHOWHIDDEN);
+
+		if (0 <= (hr = pFileOpen->SetFileTypes(cFileTypes, rgFilterSpec)) && 
+			0 <= (hr = pFileOpen->SetFileTypeIndex(1 + iFileType)) && 
+			0 <= (hr = pFileOpen->Show(hwndDlg)))
+		{
+			IShellItem *pItem;
+			hr = pFileOpen->GetResult(&pItem);
+
+			if (SUCCEEDED(hr))
+			{
+				hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, ppszFilePath);
+				pItem->Release();
+			}
+		}
+		pFileOpen->Release();
+	}
+
+	return hr;
+}
+
 void CMyApp::OnBrowse(HWND hwndDlg, HWND hwndEdit)
 {
-	OPENFILENAME ofn = { sizeof ofn };
-	ofn.hwndOwner = hwndDlg;
-	ofn.lpstrFile = (PWSTR)alloca(MAX_PATH * sizeof WCHAR);
-	ofn.nMaxFile = MAX_PATH;
-	*ofn.lpstrFile = 0;
-	ofn.lpstrFile[0] = 0;
-	ofn.lpstrFilter = L"Executable\0*.exe\0All Files\0*.*\0";
-	ofn.nFilterIndex = 1;
-	ofn.Flags = OFN_DONTADDTORECENT|OFN_ENABLESIZING|
-		OFN_EXPLORER|OFN_FILEMUSTEXIST|OFN_FORCESHOWHIDDEN
-		|OFN_PATHMUSTEXIST|OFN_HIDEREADONLY;
-	ofn.FlagsEx = OFN_EX_NOPLACESBAR;
+	PWSTR pszFilePath;
+	static const COMDLG_FILTERSPEC rgSpec[] =
+	{ 
+		{ L"Executable", L"*.exe" },
+		{ L"Crash Dumps", L"*.dll" },
+		{ L"All files", L"*" },
+	};
+	
+	UINT iFileType;
+	switch (GetDlgCtrlID(m_lastEdit))
+	{
+	case IDC_EDIT1:
+		iFileType = 0;
+		break;
+	case IDC_EDIT4:
+		iFileType = 1;
+		break;
+	default:
+		iFileType = 2;
+	}
+	HRESULT hr = OnBrowseI(hwndDlg, _countof(rgSpec), rgSpec, &pszFilePath, iFileType);
 
-	if (GetOpenFileName(&ofn)){
-		SetWindowText(hwndEdit, ofn.lpstrFile);
+	if (SUCCEEDED(hr))
+	{
+		SetWindowTextW(hwndEdit, pszFilePath);
+		CoTaskMemFree(pszFilePath);
 	}
 	m_lastEdit = hwndEdit;
 	SetFocus(hwndEdit);
@@ -1231,6 +1281,7 @@ INT_PTR CMyApp::DialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam
 		int i;
 		BOOL f;
 		NTSTATUS status;
+		HDEBOBJ* p;
 	};
 
 	switch(message) 
@@ -1681,13 +1732,13 @@ NTSTATUS CMyApp::OnRun()
 
 	PROCESS_INFORMATION pi;
 
-	HANDLE hDebugObject = 0;
-
 	if (0 <= (i = ComboBox_GetCurSel(m_hwDeb))) 
 	{
-		dwCreationFlags |= DEBUG_PROCESS;
-		hDebugObject = ((HDEBOBJ*)ComboBox_GetItemData(m_hwDeb, i))->hDebugObject;
-		DbgUiSetThreadDebugObject(hDebugObject);
+		if (HDEBOBJ* p = (HDEBOBJ*)ComboBox_GetItemData(m_hwDeb, i))
+		{
+			dwCreationFlags |= DEBUG_PROCESS;
+			DbgUiSetThreadDebugObject(p->hDebugObject);
+		}
 	}
 
 	if (strA[e_Dll])
@@ -1739,7 +1790,7 @@ NTSTATUS CMyApp::OnRun()
 		NtClose(pi.hProcess);
 	} 
 
-	if (hDebugObject) DbgUiSetThreadDebugObject(0);
+	DbgUiSetThreadDebugObject(0);
 
 	return status;
 }
@@ -1868,7 +1919,7 @@ extern "C"
 void ep([[maybe_unused]] PVOID wow)
 {	
 #ifndef _WIN64
-	if (0 > ZwQueryInformationProcess(NtCurrentProcess(), ProcessWow64Information, &wow, sizeof(wow), 0) || wow)
+	if (0 > NtQueryInformationProcess(NtCurrentProcess(), ProcessWow64Information, &wow, sizeof(wow), 0) || wow)
 	{
 		MessageBox(0, L"The 32-bit version of this program is not compatible with the 64-bit Windows you're running.", 
 			L"Machine Type Mismatch", MB_ICONWARNING);
@@ -1894,7 +1945,11 @@ void ep([[maybe_unused]] PVOID wow)
 	g_OSversion = (USHORT)((M << 8) + m);
 	InitShowCmdLine();
 	
-	{ CMyApp theApp; }
+	if (0 <= CoInitializeEx(0, COINIT_APARTMENTTHREADED|COINIT_DISABLE_OLE1DDE))
+	{
+		{ CMyApp theApp{}; }
+		CoUninitialize();
+	}
 	
 	ExitProcess(0);
 }

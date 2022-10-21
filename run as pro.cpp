@@ -826,7 +826,7 @@ class CMyApp
 	
 	HANDLE _hSysToken;
 	HFONT _hFont;
-	LONG m_SessionMask, m_Flags;
+	LONG m_Flags;
 	HWND m_hWnd, m_hwPro, m_lastEdit, m_CopyEnv, m_hwDeb, m_hwSesId, m_hwndEdit[e_EditCount];
 	
 	static INT_PTR CALLBACK StartDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -875,12 +875,6 @@ CMyApp::~CMyApp()
 
 CMyApp::CMyApp()
 {
-	m_first = 0;
-	m_SessionMask = 0;
-	_hSysToken = 0;
-	m_Flags = 0;
-	_hFont = 0;
-	
 	DialogBoxParamW((HINSTANCE)&__ImageBase, 
 		MAKEINTRESOURCE(IDD_DIALOG1), HWND_DESKTOP, StartDialogProc, (LPARAM)this);
 }
@@ -1403,21 +1397,47 @@ INT_PTR CMyApp::DialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam
 	return 0;
 }
 
+BOOLEAN IsAlreadyExistSessionId(SYSTEM_PROCESS_INFORMATION* sp, SYSTEM_PROCESS_INFORMATION* cur, ULONG SessionId)
+{
+	ULONG NextEntryOffset = 0;
+	do 
+	{
+		(ULONG_PTR&)sp += NextEntryOffset;
+
+		if (sp == cur)
+		{
+			return FALSE;
+		}
+
+		if (sp->SessionId == SessionId)
+		{
+			return TRUE;
+		}
+
+	} while (NextEntryOffset = sp->NextEntryOffset);
+
+	__debugbreak();
+
+	return 0;
+}
+
 int CMyApp::OnDropDownPro(HWND hwndCtl, HWND hwndDlg )
 {
 	ComboBox_ResetContent(hwndCtl);
+	ComboBox_ResetContent(m_hwSesId);
 	
 	HWND hwSesId = m_hwSesId;
-	LONG SessionMask = 0, _SessionMask = m_SessionMask;
+	LONG SessionMask = 0;
 	NTSTATUS status;
 	DWORD cb = 0x10000, rcb;
 
 	union {
-		PBYTE pb;
+		PVOID pv;
+		ULONG_PTR pb;
 		SYSTEM_PROCESS_INFORMATION* sp;
 	};
 
-	ULONG SessionId, MySessionId;
+	ULONG SessionId, MySessionId, LastSessionId = 0;
 	int index = -1, i;
 
 	ProcessIdToSessionId(GetCurrentProcessId(), &MySessionId);
@@ -1448,7 +1468,7 @@ int CMyApp::OnDropDownPro(HWND hwndCtl, HWND hwndDlg )
 						LoadDrv();
 					}
 				}
-				pb = buf;
+				pv = buf;
 
 				cb = 0;
 				PVOID stack = alloca(guz);
@@ -1459,7 +1479,10 @@ int CMyApp::OnDropDownPro(HWND hwndCtl, HWND hwndDlg )
 				{
 					pb += NextEntryDelta;
 
-					if (!sp->UniqueProcessId) continue;
+					if (!sp->UniqueProcessId) {
+						sp->SessionId = MAXULONG;
+						continue;
+					}
 					
 					cid.UniqueProcess = (HANDLE)(ULONG_PTR)sp->UniqueProcessId;
 					HANDLE hProcess;
@@ -1499,7 +1522,7 @@ int CMyApp::OnDropDownPro(HWND hwndCtl, HWND hwndDlg )
 
 					SessionId = sp->SessionId;
 
-					swprintf(sz, L"%04X[%04X] %u %c%c%c %wZ", 
+					swprintf_s(sz, cb >> 1, L"%04X[%04X] %u %c%c%c %wZ", 
 						(ULONG)(ULONG_PTR)sp->UniqueProcessId, 
 						(ULONG)(ULONG_PTR)sp->InheritedFromUniqueProcessId, 
 						SessionId, f, c, d, &sp->ImageName);
@@ -1508,19 +1531,18 @@ int CMyApp::OnDropDownPro(HWND hwndCtl, HWND hwndDlg )
 
 					if (sp->UniqueProcessId == id) index = i;
 
-					if (SessionId < 32)
+					if (SessionId < 32 ? !_bittestandset(&SessionMask, SessionId) : 
+						LastSessionId != SessionId && !IsAlreadyExistSessionId((SYSTEM_PROCESS_INFORMATION*)buf, sp, SessionId))
 					{
-						if (!_bittestandset(&SessionMask, SessionId) &&
-							!_bittestandreset(&_SessionMask, SessionId))
+						swprintf_s(sz, cb >> 1, L"%u", SessionId);
+						ComboBox_SetItemData(hwSesId, i = ComboBox_AddString(hwSesId, sz), SessionId);
+						if (MySessionId == SessionId)
 						{
-							swprintf(sz, L"%u", SessionId);
-							ComboBox_SetItemData(hwSesId, i = ComboBox_AddString(hwSesId, sz), SessionId);
-							if (MySessionId == SessionId)
-							{
-								ComboBox_SetCurSel(hwSesId, i);
-							}
+							ComboBox_SetCurSel(hwSesId, i);
 						}
 					}
+
+					LastSessionId = SessionId;
 
 				} while(NextEntryDelta = sp->NextEntryOffset);
 			}
@@ -1529,25 +1551,6 @@ int CMyApp::OnDropDownPro(HWND hwndCtl, HWND hwndDlg )
 		}
 		
 	} while(status == STATUS_INFO_LENGTH_MISMATCH);
-
-	if (_SessionMask)
-	{
-		SessionId = 31;
-		do 
-		{
-			if (_bittest(&_SessionMask, SessionId))
-			{
-				WCHAR sz[15];
-				swprintf(sz, L"%u", SessionId);
-				if (0 <= (i = ComboBox_FindStringExact(hwSesId, 0, sz)))
-				{
-					ComboBox_DeleteString(hwSesId, i);
-				}
-			}
-		} while (SessionId--);
-	}
-
-	m_SessionMask = SessionMask;
 
 	return index;
 }

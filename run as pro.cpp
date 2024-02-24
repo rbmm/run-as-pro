@@ -434,6 +434,18 @@ NTSTATUS CreateProcessEx(HANDLE hProcess,
 	HANDLE hToken;
 	NTSTATUS status = NtOpenProcessToken(hProcess, TOKEN_QUERY|TOKEN_DUPLICATE|TOKEN_ASSIGN_PRIMARY, &hToken);
 
+	if (0 > status)
+	{
+		HANDLE hToken2;
+		if (0 <= (status = NtOpenProcessToken(hProcess, TOKEN_QUERY|TOKEN_DUPLICATE, &hToken2)))
+		{
+			status = NtDuplicateToken(hToken2, TOKEN_ASSIGN_PRIMARY|TOKEN_QUERY|TOKEN_DUPLICATE, 
+				0, FALSE, TokenPrimary, &hToken);
+
+			NtClose(hToken2);
+		}
+	}
+
 	if (0 <= status)
 	{
 		status = GetLastNtStatus(CreateProcessAsUserW(hToken, lpApplicationName, 
